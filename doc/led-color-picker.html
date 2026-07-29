@@ -144,12 +144,30 @@
       font-size: 12px;
     }
 
-    .channel strong {
+    .channel span {
       display: block;
-      margin-top: 3px;
+      margin-bottom: 5px;
+    }
+
+    .channel input {
+      width: 100%;
+      min-width: 0;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-bottom: 1px solid #344050;
+      border-radius: 0;
+      outline: none;
       color: #f5f7fb;
+      background: transparent;
       font: 700 20px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
     }
+
+    .channel input:focus {
+      border-bottom-color: var(--picked);
+    }
+
+    .channel input::-webkit-inner-spin-button { opacity: .55; }
 
     .values { display: grid; gap: 10px; }
 
@@ -243,9 +261,9 @@
       </div>
 
       <div class="channels" aria-label="RGB 通道值">
-        <div class="channel">RED<strong id="red">125</strong></div>
-        <div class="channel">GREEN<strong id="green">0</strong></div>
-        <div class="channel">BLUE<strong id="blue">0</strong></div>
+        <label class="channel"><span>RED</span><input id="red" type="number" min="0" max="255" value="125" inputmode="numeric" aria-label="红色通道，0 到 255"></label>
+        <label class="channel"><span>GREEN</span><input id="green" type="number" min="0" max="255" value="0" inputmode="numeric" aria-label="绿色通道，0 到 255"></label>
+        <label class="channel"><span>BLUE</span><input id="blue" type="number" min="0" max="255" value="0" inputmode="numeric" aria-label="蓝色通道，0 到 255"></label>
       </div>
 
       <div class="values">
@@ -306,9 +324,9 @@
 
       picker.value = `#${hex.toLowerCase()}`;
       hexInput.value = hex;
-      fields.red.textContent = red;
-      fields.green.textContent = green;
-      fields.blue.textContent = blue;
+      fields.red.value = red;
+      fields.green.value = green;
+      fields.blue.value = blue;
       fields.rrggbb.textContent = hex;
       fields.hexValue.textContent = `0x${hex}`;
       fields.decimal.textContent = numeric;
@@ -321,6 +339,19 @@
     picker.addEventListener('input', event => setColor(event.target.value));
     hexInput.addEventListener('input', event => {
       if (!setColor(event.target.value)) hexInput.setAttribute('aria-invalid', 'true');
+    });
+
+    function setFromChannels() {
+      const channels = [fields.red, fields.green, fields.blue];
+      if (channels.some(field => field.value === '' || !Number.isFinite(field.valueAsNumber))) return;
+      const values = channels.map(field => Math.max(0, Math.min(255, Math.round(field.valueAsNumber))));
+      const hex = values.map(value => value.toString(16).padStart(2, '0')).join('').toUpperCase();
+      setColor(hex);
+    }
+
+    [fields.red, fields.green, fields.blue].forEach(field => {
+      field.addEventListener('input', setFromChannels);
+      field.addEventListener('change', setFromChannels);
     });
 
     document.querySelectorAll('[data-color]').forEach(button => {
