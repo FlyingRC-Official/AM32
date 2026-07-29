@@ -10,6 +10,8 @@
 #ifdef USE_ADC
 #ifdef USE_ADC_INPUT
 uint16_t ADCDataDMA[4];
+#elif defined(NO_CURRENT_SENSOR)
+uint16_t ADCDataDMA[2];
 #else
 uint16_t ADCDataDMA[3];
 #endif
@@ -27,7 +29,10 @@ void ADC_DMA_Callback()
     ADC_raw_volts = ADCDataDMA[1] / 2;
     ADC_raw_current = ADCDataDMA[2];
     ADC_raw_input = ADCDataDMA[0];
-
+#elif defined(NO_CURRENT_SENSOR)
+    ADC_raw_volts = ADCDataDMA[0];
+    ADC_raw_current = 0;
+    ADC_raw_temp = ADCDataDMA[1];
 #else
     ADC_raw_temp = ADCDataDMA[2];
 #ifdef PA6_VOLTAGE
@@ -48,7 +53,11 @@ void ADC_Init(void)
     nvic_irq_enable(DMA1_Channel1_IRQn, 2, 0);
     dma_reset(DMA1_CHANNEL1);
     dma_default_para_init(&dma_init_struct);
+#ifdef NO_CURRENT_SENSOR
+    dma_init_struct.buffer_size = 2;
+#else
     dma_init_struct.buffer_size = 3;
+#endif
     dma_init_struct.direction = DMA_DIR_PERIPHERAL_TO_MEMORY;
     dma_init_struct.memory_base_addr = (uint32_t)&ADCDataDMA;
     dma_init_struct.memory_data_width = DMA_MEMORY_DATA_WIDTH_HALFWORD;
@@ -71,12 +80,23 @@ void ADC_Init(void)
     adc_base_struct.sequence_mode = TRUE;
     adc_base_struct.repeat_mode = TRUE;
     adc_base_struct.data_align = ADC_RIGHT_ALIGNMENT;
+#ifdef NO_CURRENT_SENSOR
+    adc_base_struct.ordinary_channel_length = 2;
+#else
     adc_base_struct.ordinary_channel_length = 3;
+#endif
     adc_base_config(ADC1, &adc_base_struct);
 
+#ifdef NO_CURRENT_SENSOR
+    adc_ordinary_channel_set(ADC1, VOLTAGE_ADC_CHANNEL, 1,
+        ADC_SAMPLETIME_28_5);
+    adc_ordinary_channel_set(ADC1, ADC_CHANNEL_16, 2,
+        ADC_SAMPLETIME_28_5);
+#else
     adc_ordinary_channel_set(ADC1, ADC_CHANNEL_3, 1, ADC_SAMPLETIME_28_5);
     adc_ordinary_channel_set(ADC1, ADC_CHANNEL_6, 2, ADC_SAMPLETIME_28_5);
     adc_ordinary_channel_set(ADC1, ADC_CHANNEL_16, 3, ADC_SAMPLETIME_28_5);
+#endif
 
     adc_tempersensor_vintrv_enable(TRUE);
     adc_ordinary_conversion_trigger_set(ADC1, ADC12_ORDINARY_TRIG_SOFTWARE, TRUE);

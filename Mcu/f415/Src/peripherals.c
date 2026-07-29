@@ -17,6 +17,9 @@
 #include "functions.h"
 #include "serial_telemetry.h"
 #include "targets.h"
+#ifdef USE_LED_STRIP
+#include "WS2812.h"
+#endif
 
 void initCorePeripherals(void)
 {
@@ -38,6 +41,9 @@ void initCorePeripherals(void)
     UN_TIM_Init();
 #ifdef USE_SERIAL_TELEMETRY
     telem_UART_Init();
+#endif
+#ifdef USE_LED_STRIP
+    WS2812_Init();
 #endif
 }
 
