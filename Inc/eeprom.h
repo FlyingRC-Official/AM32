@@ -1,4 +1,5 @@
 #include "main.h"
+#include <stddef.h>
 
 #pragma once
 
@@ -68,11 +69,20 @@ typedef union EEprom_u {
             uint8_t filter_hz; // 181
             uint8_t debug_rate; // 182
             uint8_t term_enable; // 183
-            uint8_t reserved[8]; // 184-191
+            uint8_t led_mode; // 184: 0=status, 1=manual RGB
+            uint8_t led_red; // 185
+            uint8_t led_green; // 186
+            uint8_t led_blue; // 187
+            uint16_t voltage_divider; // 188-189
+            uint8_t reserved[2]; // 190-191
         } can;
     };
     uint8_t buffer[192];
 } EEprom_t;
+
+_Static_assert(sizeof(EEprom_t) == 192, "EEprom_t flash layout must remain 192 bytes");
+_Static_assert(offsetof(EEprom_t, can.led_mode) == 184, "LED EEPROM offset changed");
+_Static_assert(offsetof(EEprom_t, can.voltage_divider) == 188, "divider EEPROM offset changed");
 
 extern EEprom_t eepromBuffer;
 

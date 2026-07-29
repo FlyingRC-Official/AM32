@@ -444,6 +444,45 @@ uint16_t ADC_raw_volts;
 uint16_t ADC_raw_current;
 uint16_t ADC_raw_input;
 uint16_t ADC_raw_ntc;
+#ifdef FLYINGRC_75A_F415_CAN
+uint16_t ADC_raw_vref;
+static uint16_t adc_vdda_mv = 3300;
+static uint16_t adc_temp_samples[32];
+static uint16_t adc_vref_samples[32];
+static uint32_t adc_temp_sum;
+static uint32_t adc_vref_sum;
+static uint8_t adc_filter_index;
+static uint8_t adc_filter_count;
+
+extern void FlyingRC_ApplyExperimentalSettings(void);
+
+static void updateFlyingRCAdcFilter(void)
+{
+    if (ADC_raw_vref == 0 || ADC_raw_temp == 0) {
+        return;
+    }
+
+    if (adc_filter_count == 32) {
+        adc_temp_sum -= adc_temp_samples[adc_filter_index];
+        adc_vref_sum -= adc_vref_samples[adc_filter_index];
+    } else {
+        adc_filter_count++;
+    }
+
+    adc_temp_samples[adc_filter_index] = ADC_raw_temp;
+    adc_vref_samples[adc_filter_index] = ADC_raw_vref;
+    adc_temp_sum += ADC_raw_temp;
+    adc_vref_sum += ADC_raw_vref;
+    adc_filter_index = (adc_filter_index + 1U) & 31U;
+
+    const uint16_t average_vref = adc_vref_sum / adc_filter_count;
+    const uint32_t measured_vdda = (1200UL * 4095UL + average_vref / 2U) /
+                                   average_vref;
+    if (measured_vdda >= 2600U && measured_vdda <= 3600U) {
+        adc_vdda_mv = measured_vdda;
+    }
+}
+#endif
 uint8_t PROCESS_ADC_FLAG = 0;
 volatile char send_telemetry = 0;
 char telemetry_done = 0;
@@ -1350,7 +1389,13 @@ void tenKhzRoutine()
 #ifdef USE_LED_STRIP
                             //	send_LED_RGB(0,0,0);
                             delayMicros(1000);
+#ifdef FLYINGRC_75A_F415_CAN
+                            if (eepromBuffer.can.led_mode == 0) {
+                                send_LED_RGB(0, 255, 0);
+                            }
+#else
                             send_LED_RGB(0, 255, 0);
+#endif
 #endif
 #ifdef USE_RGB_LED
                             setIndividualRGBLed(0,1,0);
@@ -1748,6 +1793,9 @@ static void checkDeviceInfo(void)
 
 int main(void)
 {
+#ifdef FLYINGRC_75A_F415_CAN
+    uint8_t experimental_settings_were_invalid;
+#endif
 
 #ifdef NXP
     initCorePeripherals();
@@ -1763,7 +1811,19 @@ int main(void)
     loadEEpromSettings();
 #endif
 
-    if (VERSION_MAJOR != eepromBuffer.version.major || VERSION_MINOR != eepromBuffer.version.minor || EEPROM_VERSION > eepromBuffer.eeprom_version) {
+#ifdef FLYINGRC_75A_F415_CAN
+    experimental_settings_were_invalid =
+        (eepromBuffer.can.led_mode > 1) ||
+        (eepromBuffer.can.voltage_divider < 100) ||
+        (eepromBuffer.can.voltage_divider > 400);
+    FlyingRC_ApplyExperimentalSettings();
+#endif
+
+    if (VERSION_MAJOR != eepromBuffer.version.major || VERSION_MINOR != eepromBuffer.version.minor || EEPROM_VERSION > eepromBuffer.eeprom_version
+#ifdef FLYINGRC_75A_F415_CAN
+        || experimental_settings_were_invalid
+#endif
+    ) {
         eepromBuffer.version.major = VERSION_MAJOR;
         eepromBuffer.version.minor = VERSION_MINOR;
         eepromBuffer.eeprom_version = EEPROM_VERSION;
@@ -1805,7 +1865,9 @@ int main(void)
     GPIOA->BSRR = LL_GPIO_PIN_12;    // Pa12 attached to enable on dev board
 #endif
 #ifdef USE_LED_STRIP
+#ifndef FLYINGRC_75A_F415_CAN
     send_LED_RGB(125, 0, 0);
+#endif
 #endif
 #ifdef USE_RGB_LED
      setIndividualRGBLed(1,0,0);
@@ -2090,6 +2152,14 @@ if(zero_crosses < 5){
             adc_software_trigger_enable(ADC_REGULAR_CHANNEL);
 #endif
 #ifdef ARTERY
+#ifdef FLYINGRC_75A_F415_CAN
+            updateFlyingRCAdcFilter();
+            adc_ordinary_software_trigger_enable(ADC1, TRUE);
+            if (adc_filter_count != 0) {
+                const uint16_t average_temp = adc_temp_sum / adc_filter_count;
+                converted_degrees = getConvertedDegreesVdda(average_temp, adc_vdda_mv);
+            }
+#else
             ADC_DMA_Callback();
             adc_ordinary_software_trigger_enable(ADC1, TRUE);
     #ifdef USE_NTC
@@ -2097,6 +2167,7 @@ if(zero_crosses < 5){
     #else     
             converted_degrees = getConvertedDegrees(ADC_raw_temp);
     #endif
+#endif
 #endif
 #ifdef NXP
             //Call ADC_DMA callback to get raw data
@@ -2120,7 +2191,13 @@ if(zero_crosses < 5){
             //Actual current is in 10mA, so 1 = 10mA
             actual_current = (((smoothed_raw_current * 3300 / 65535) - CURRENT_OFFSET) * 100) / (MILLIVOLT_PER_AMP);
 #else
+#ifdef FLYINGRC_75A_F415_CAN
+            const uint16_t compensated_voltage = (uint16_t)(((uint64_t)ADC_raw_volts *
+                adc_vdda_mv * VOLTAGE_DIVIDER) / (4095ULL * 100ULL));
+            battery_voltage = ((7 * battery_voltage) + compensated_voltage) >> 3;
+#else
             battery_voltage = ((7 * battery_voltage) + ((ADC_raw_volts * 3300 / 4095 * VOLTAGE_DIVIDER) / 100)) >> 3;
+#endif
             smoothed_raw_current = getSmoothedCurrent();
             actual_current = ((smoothed_raw_current * 3300 / 41) - (CURRENT_OFFSET * 100)) / (MILLIVOLT_PER_AMP);
 #endif
@@ -2344,6 +2421,9 @@ if(zero_crosses < 5){
 #endif
 #if DRONECAN_SUPPORT
 	DroneCAN_update();
+#endif
+#ifdef USE_LED_STRIP
+        WS2812_Service();
 #endif
     }
 }

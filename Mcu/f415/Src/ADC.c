@@ -10,6 +10,8 @@
 #ifdef USE_ADC
 #ifdef USE_ADC_INPUT
 uint16_t ADCDataDMA[4];
+#elif defined(FLYINGRC_75A_F415_CAN)
+uint16_t ADCDataDMA[3];
 #elif defined(NO_CURRENT_SENSOR)
 uint16_t ADCDataDMA[2];
 #else
@@ -20,6 +22,9 @@ extern uint16_t ADC_raw_temp;
 extern uint16_t ADC_raw_volts;
 extern uint16_t ADC_raw_current;
 extern uint16_t ADC_raw_input;
+#ifdef FLYINGRC_75A_F415_CAN
+extern uint16_t ADC_raw_vref;
+#endif
 
 void ADC_DMA_Callback()
 { // read dma buffer and set extern variables
@@ -29,6 +34,12 @@ void ADC_DMA_Callback()
     ADC_raw_volts = ADCDataDMA[1] / 2;
     ADC_raw_current = ADCDataDMA[2];
     ADC_raw_input = ADCDataDMA[0];
+#elif defined(FLYINGRC_75A_F415_CAN)
+    /* Publish only after DMA has completed the full voltage/VREF/temp sequence. */
+    ADC_raw_volts = ADCDataDMA[0];
+    ADC_raw_vref = ADCDataDMA[1];
+    ADC_raw_temp = ADCDataDMA[2];
+    ADC_raw_current = 0;
 #elif defined(NO_CURRENT_SENSOR)
     ADC_raw_volts = ADCDataDMA[0];
     ADC_raw_current = 0;
@@ -53,7 +64,9 @@ void ADC_Init(void)
     nvic_irq_enable(DMA1_Channel1_IRQn, 2, 0);
     dma_reset(DMA1_CHANNEL1);
     dma_default_para_init(&dma_init_struct);
-#ifdef NO_CURRENT_SENSOR
+#ifdef FLYINGRC_75A_F415_CAN
+    dma_init_struct.buffer_size = 3;
+#elif defined(NO_CURRENT_SENSOR)
     dma_init_struct.buffer_size = 2;
 #else
     dma_init_struct.buffer_size = 3;
@@ -74,20 +87,37 @@ void ADC_Init(void)
 
     adc_base_config_type adc_base_struct;
     crm_periph_clock_enable(CRM_ADC1_PERIPH_CLOCK, TRUE);
+#ifdef FLYINGRC_75A_F415_CAN
+    crm_adc_clock_div_set(CRM_ADC_DIV_16);
+#else
     crm_adc_clock_div_set(CRM_ADC_DIV_6);
+#endif
 
     adc_base_default_para_init(&adc_base_struct);
     adc_base_struct.sequence_mode = TRUE;
+#ifdef FLYINGRC_75A_F415_CAN
+    adc_base_struct.repeat_mode = FALSE;
+#else
     adc_base_struct.repeat_mode = TRUE;
+#endif
     adc_base_struct.data_align = ADC_RIGHT_ALIGNMENT;
-#ifdef NO_CURRENT_SENSOR
+#ifdef FLYINGRC_75A_F415_CAN
+    adc_base_struct.ordinary_channel_length = 3;
+#elif defined(NO_CURRENT_SENSOR)
     adc_base_struct.ordinary_channel_length = 2;
 #else
     adc_base_struct.ordinary_channel_length = 3;
 #endif
     adc_base_config(ADC1, &adc_base_struct);
 
-#ifdef NO_CURRENT_SENSOR
+#ifdef FLYINGRC_75A_F415_CAN
+    adc_ordinary_channel_set(ADC1, VOLTAGE_ADC_CHANNEL, 1,
+        ADC_SAMPLETIME_28_5);
+    adc_ordinary_channel_set(ADC1, ADC_CHANNEL_17, 2,
+        ADC_SAMPLETIME_239_5);
+    adc_ordinary_channel_set(ADC1, ADC_CHANNEL_16, 3,
+        ADC_SAMPLETIME_239_5);
+#elif defined(NO_CURRENT_SENSOR)
     adc_ordinary_channel_set(ADC1, VOLTAGE_ADC_CHANNEL, 1,
         ADC_SAMPLETIME_28_5);
     adc_ordinary_channel_set(ADC1, ADC_CHANNEL_16, 2,
@@ -116,6 +146,11 @@ void startADCConversion() { adc_ordinary_software_trigger_enable(ADC1, TRUE); }
 int16_t getConvertedDegrees(uint16_t adcrawtemp)
 {
     return (12600 - (int32_t)adcrawtemp * 33000 / 4096) / -42 + 5;
+}
+
+int16_t getConvertedDegreesVdda(uint16_t adcrawtemp, uint16_t vdda_mv)
+{
+    return (12600 - (int32_t)adcrawtemp * vdda_mv * 10 / 4096) / -42 + 5;
 }
 
 #endif // USE_ADC

@@ -22,6 +22,9 @@
 #include "phaseouts.h"
 #include "functions.h"
 #include "filter.h"
+#ifdef FLYINGRC_75A_F415_CAN
+#include "WS2812.h"
+#endif
 
 // include the headers for the generated DroneCAN messages from the
 // dronecan_dsdlc compiler
@@ -108,6 +111,9 @@ extern volatile uint32_t commutation_interval;
 extern uint8_t auto_advance_level;
 extern uint16_t low_cell_volt_cutoff;
 extern uint32_t desync_happened;
+#ifdef FLYINGRC_75A_F415_CAN
+extern uint16_t VOLTAGE_DIVIDER;
+#endif
 
 static uint16_t last_can_input;
 static uint64_t last_heartbeat_us;
@@ -171,17 +177,54 @@ static const struct parameter {
         { "DRAG_BRAKE_STRENGTH",    T_UINT8, 1, 10,  10, &eepromBuffer.drag_brake_strength},
         { "INPUT_SIGNAL_TYPE",      T_UINT8, 0, 5,   5, &eepromBuffer.input_type},
         { "INPUT_FILTER_HZ",        T_UINT8, 0, 100, 0, &eepromBuffer.can.filter_hz},
+#ifdef FLYINGRC_75A_F415_CAN
+        { "LED_MODE",               T_UINT8, 0, 1,   0, &eepromBuffer.can.led_mode},
+        { "LED_RED",                T_UINT8, 0, 255, 125, &eepromBuffer.can.led_red},
+        { "LED_GREEN",              T_UINT8, 0, 255, 0, &eepromBuffer.can.led_green},
+        { "LED_BLUE",               T_UINT8, 0, 255, 0, &eepromBuffer.can.led_blue},
+        { "VOLTAGE_DIVIDER",        T_UINT16,100,400,199, &eepromBuffer.can.voltage_divider},
+#endif
 #ifdef CAN_TERM_PIN
         { "CAN_TERM_ENABLE",        T_BOOL,  0, 1,   0, &eepromBuffer.can.term_enable},
 #endif
         { "STARTUP_TUNE",           T_STRING,0, 4,   0, &eepromBuffer.tune},
 };
 
+#ifdef FLYINGRC_75A_F415_CAN
+void FlyingRC_ApplyExperimentalSettings(void)
+{
+    if (eepromBuffer.can.led_mode > 1) {
+        eepromBuffer.can.led_mode = 0;
+        eepromBuffer.can.led_red = 125;
+        eepromBuffer.can.led_green = 0;
+        eepromBuffer.can.led_blue = 0;
+    }
+    if (eepromBuffer.can.voltage_divider < 100 ||
+        eepromBuffer.can.voltage_divider > 400) {
+        eepromBuffer.can.voltage_divider = 199;
+    }
+
+    VOLTAGE_DIVIDER = eepromBuffer.can.voltage_divider;
+    if (eepromBuffer.can.led_mode == 1) {
+        send_LED_RGB(eepromBuffer.can.led_red,
+                     eepromBuffer.can.led_green,
+                     eepromBuffer.can.led_blue);
+    } else if (armed) {
+        send_LED_RGB(0, 255, 0);
+    } else {
+        send_LED_RGB(125, 0, 0);
+    }
+}
+#endif
+
 /*
   get settings from eeprom
 */
 static void load_settings(void)
 {
+#ifdef FLYINGRC_75A_F415_CAN
+    FlyingRC_ApplyExperimentalSettings();
+#endif
     /*
       run through parameters checking for those in the eepromBuffer
       structure. For those parameters reset to default if out of
@@ -345,12 +388,24 @@ static void handle_param_GetSet(CanardInstance* ins, CanardRxTransfer* transfer)
 	  a parameter set command
 	*/
 	switch (p->vtype) {
-            case T_UINT8: {
+	case T_UINT8: {
                 uint8_t *ptr8 = (uint8_t *)p->ptr;
+#ifdef FLYINGRC_75A_F415_CAN
+                int64_t requested = req.value.integer_value;
+                if (requested < p->min_value) {
+                    requested = p->min_value;
+                } else if (requested > p->max_value) {
+                    requested = p->max_value;
+                }
+#endif
                 if (ptr8 == &eepromBuffer.limits.current) {
                     *ptr8 = req.value.integer_value / 2;
                 } else {
+#ifdef FLYINGRC_75A_F415_CAN
+                    *ptr8 = requested;
+#else
                     *ptr8 = req.value.integer_value;
+#endif
                 }
                 if (ptr8 == &eepromBuffer.advance_level) {
                     *ptr8 = req.value.integer_value + 10; // adjust for advance level offset for eeprom v3
@@ -359,7 +414,17 @@ static void handle_param_GetSet(CanardInstance* ins, CanardRxTransfer* transfer)
             }
             case T_UINT16: {
                 uint16_t *ptr16 = (uint16_t *)p->ptr;
+#ifdef FLYINGRC_75A_F415_CAN
+                int64_t requested = req.value.integer_value;
+                if (requested < p->min_value) {
+                    requested = p->min_value;
+                } else if (requested > p->max_value) {
+                    requested = p->max_value;
+                }
+                *ptr16 = requested;
+#else
                 *ptr16 = req.value.integer_value;
+#endif
                 if (ptr16 == &motor_kv) {
                     eepromBuffer.motor_kv = (uint8_t)((*(uint16_t *)p->ptr - 20) / 40);
                 } else if (ptr16 == &low_cell_volt_cutoff) {
@@ -396,6 +461,9 @@ static void handle_param_GetSet(CanardInstance* ins, CanardRxTransfer* transfer)
             armed = 0;
             set_input(0);
         }
+#ifdef FLYINGRC_75A_F415_CAN
+        FlyingRC_ApplyExperimentalSettings();
+#endif
     }
 
     /*
@@ -514,6 +582,10 @@ static void handle_param_ExecuteOpcode(CanardInstance* ins, CanardRxTransfer* tr
             save_flash_nolib(eepromBuffer.buffer, sizeof(eepromBuffer.buffer), eeprom_address);
             loadEEpromSettings();
             load_settings();
+#ifdef FLYINGRC_75A_F415_CAN
+            /* Persist the explicit experimental defaults, not erased 0xFF bytes. */
+            saveEEpromSettings();
+#endif
 	    pkt.ok = true;
 	}
     }

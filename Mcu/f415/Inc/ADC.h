@@ -17,5 +17,6 @@ void activateADC();
 void ADC_Init(void);
 void startADCConversion();
 int16_t getConvertedDegrees(uint16_t adcrawtemp);
+int16_t getConvertedDegreesVdda(uint16_t adcrawtemp, uint16_t vdda_mv);
 
 #endif /* ADC_H_ */
