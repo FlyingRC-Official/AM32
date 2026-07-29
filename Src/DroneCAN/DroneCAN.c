@@ -76,6 +76,7 @@ enum VarType {
     T_BOOL = 0,
     T_UINT8,
     T_UINT16,
+    T_UINT32,
     T_STRING,
 };
 
@@ -96,6 +97,10 @@ static struct PACKED {
 } debug1;
 
 static void can_printf(const char *fmt, ...);
+
+#ifdef FLYINGRC_75A_F415_CAN
+static uint32_t led_color_parameter = 0x7D0000;
+#endif
 
 // some convenience macros
 #define MIN(a,b) ((a)<(b)?(a):(b))
@@ -132,9 +137,9 @@ static void set_input(uint16_t input);
 static const struct parameter {
     char *name;
     enum VarType vtype;
-    uint16_t min_value;
-    uint16_t max_value;
-    uint16_t default_value;
+    uint32_t min_value;
+    uint32_t max_value;
+    uint32_t default_value;
     void *ptr;
 } parameters[] = {
         // list of settable parameters
@@ -179,9 +184,7 @@ static const struct parameter {
         { "INPUT_FILTER_HZ",        T_UINT8, 0, 100, 0, &eepromBuffer.can.filter_hz},
 #ifdef FLYINGRC_75A_F415_CAN
         { "LED_MODE",               T_UINT8, 0, 1,   0, &eepromBuffer.can.led_mode},
-        { "LED_RED",                T_UINT8, 0, 255, 125, &eepromBuffer.can.led_red},
-        { "LED_GREEN",              T_UINT8, 0, 255, 0, &eepromBuffer.can.led_green},
-        { "LED_BLUE",               T_UINT8, 0, 255, 0, &eepromBuffer.can.led_blue},
+        { "LED_COLOR",              T_UINT32,0,0xFFFFFF,0x7D0000, &led_color_parameter},
         { "VOLTAGE_DIVIDER",        T_UINT16,100,400,199, &eepromBuffer.can.voltage_divider},
 #endif
 #ifdef CAN_TERM_PIN
@@ -205,6 +208,9 @@ void FlyingRC_ApplyExperimentalSettings(void)
     }
 
     VOLTAGE_DIVIDER = eepromBuffer.can.voltage_divider;
+    led_color_parameter = ((uint32_t)eepromBuffer.can.led_red << 16) |
+                          ((uint32_t)eepromBuffer.can.led_green << 8) |
+                          eepromBuffer.can.led_blue;
     if (eepromBuffer.can.led_mode == 1) {
         send_LED_RGB(eepromBuffer.can.led_red,
                      eepromBuffer.can.led_green,
@@ -253,6 +259,7 @@ static void load_settings(void)
                 break;
             }
             case T_UINT16:
+            case T_UINT32:
             case T_STRING:
                 break;
         }
@@ -432,6 +439,24 @@ static void handle_param_GetSet(CanardInstance* ins, CanardRxTransfer* transfer)
                 }
                 break;
             }
+            case T_UINT32: {
+                int64_t requested = req.value.integer_value;
+                if (requested < p->min_value) {
+                    requested = p->min_value;
+                } else if ((uint64_t)requested > p->max_value) {
+                    requested = p->max_value;
+                }
+                uint32_t *ptr32 = (uint32_t *)p->ptr;
+                *ptr32 = requested;
+#ifdef FLYINGRC_75A_F415_CAN
+                if (ptr32 == &led_color_parameter) {
+                    eepromBuffer.can.led_red = (*ptr32 >> 16) & 0xFF;
+                    eepromBuffer.can.led_green = (*ptr32 >> 8) & 0xFF;
+                    eepromBuffer.can.led_blue = *ptr32 & 0xFF;
+                }
+#endif
+                break;
+            }
             case T_BOOL:
                 *(uint8_t *)p->ptr = req.value.boolean_value?1:0;
                 break;
@@ -508,6 +533,16 @@ static void handle_param_GetSet(CanardInstance* ins, CanardRxTransfer* transfer)
         case T_UINT16:
             pkt.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
             pkt.value.integer_value = *(uint16_t *)p->ptr;
+            pkt.default_value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
+            pkt.default_value.integer_value = p->default_value;
+            pkt.max_value.union_tag = UAVCAN_PROTOCOL_PARAM_NUMERICVALUE_INTEGER_VALUE;
+            pkt.max_value.integer_value = p->max_value;
+            pkt.min_value.union_tag = UAVCAN_PROTOCOL_PARAM_NUMERICVALUE_INTEGER_VALUE;
+            pkt.min_value.integer_value = p->min_value;
+            break;
+	case T_UINT32:
+            pkt.value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
+            pkt.value.integer_value = *(uint32_t *)p->ptr;
             pkt.default_value.union_tag = UAVCAN_PROTOCOL_PARAM_VALUE_INTEGER_VALUE;
             pkt.default_value.integer_value = p->default_value;
             pkt.max_value.union_tag = UAVCAN_PROTOCOL_PARAM_NUMERICVALUE_INTEGER_VALUE;
